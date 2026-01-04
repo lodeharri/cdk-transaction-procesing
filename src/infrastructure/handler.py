@@ -5,6 +5,7 @@ from application.use_case import ProcessPaymentUseCase
 from infrastructure.repositories import DynamoRepository
 from infrastructure.event_bus import EventBridgeBus
 from domain.services.settlement import SettlementService
+import uuid
 
 # Inyección de Dependencias (Ensamblaje manual)
 repo = DynamoRepository()
@@ -16,6 +17,10 @@ def handler(event, context):
     try:
         # 1. Validación de entrada (Pydantic)
         body = json.loads(event.get("body", "{}"))
+        correlation_id = event.get("headers", {}).get("x-correlation-id", str(uuid.uuid4()))
+
+        body["correlation_id"] = correlation_id
+
         input_dto = PaymentInputDTO(**body)
 
         # 2. Ejecución del Caso de Uso

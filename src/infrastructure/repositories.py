@@ -19,7 +19,9 @@ class DynamoRepository:
                     'id': tx.id,
                     'idempotency_key': tx.idempotency_key,
                     'amount': Decimal(str(tx.amount.amount)),
-                    'status': tx.status.value
+                    'status': tx.status.value,
+                    'merchant_id': tx.merchant_id,
+                    'correlation_id': tx.correlation_id
                 },
                 ConditionExpression='attribute_not_exists(idempotency_key)'
             )

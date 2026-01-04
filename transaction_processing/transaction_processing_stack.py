@@ -11,7 +11,8 @@ from aws_cdk import (
     aws_logs as logs,
 )
 from constructs import Construct
-from aws_cdk.aws_lambda_python_alpha import PythonFunction, PythonLayerVersion
+from aws_cdk.aws_lambda_python_alpha import PythonLayerVersion
+from aws_cdk.aws_lambda_event_sources import DynamoEventSource
 
 class TransactionProcessingStack(Stack):
 
@@ -21,7 +22,8 @@ class TransactionProcessingStack(Stack):
         transaction_table = dynamodb.Table(self, "Transactions",
             partition_key=dynamodb.Attribute(name="idempotency_key", type=dynamodb.AttributeType.STRING),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            removal_policy=RemovalPolicy.DESTROY
+            removal_policy=RemovalPolicy.DESTROY,
+            stream=dynamodb.StreamViewType.NEW_IMAGE
         )
 
         bus = events.EventBus(self, "TransactionEventBus",
@@ -51,8 +53,26 @@ class TransactionProcessingStack(Stack):
             }
         )
 
+        relay_lambda = _lambda.Function(self, "OutboxRelayFunction",
+            runtime=_lambda.Runtime.PYTHON_3_11,
+            handler="infrastructure.outbox_relay.handler",
+            code=_lambda.Code.from_asset("src"), 
+            timeout=Duration.seconds(30),
+            environment={
+                "EVENT_BUS_NAME": bus.event_bus_name,
+            }
+        )
+
         transaction_table.grant_read_write_data(self.payment_lambda)
-        bus.grant_put_events_to(self.payment_lambda)
+        # bus.grant_put_events_to(self.payment_lambda)
+        bus.grant_put_events_to(relay_lambda)
+
+        relay_lambda.add_event_source(DynamoEventSource(
+            transaction_table,
+            starting_position=_lambda.StartingPosition.LATEST,
+            batch_size=5,
+            retry_attempts=2
+        ))
 
         log_group = logs.LogGroup(
             self, "EventLogGroup",
@@ -63,7 +83,8 @@ class TransactionProcessingStack(Stack):
         events.Rule(self, "CatchAllRule",
             event_bus=bus,
             event_pattern=events.EventPattern(
-                source=["some.payments"]
+                source=["some.payments"],
+                detail_type=["PaymentConfirmed"]
             ),
             targets=[targets.CloudWatchLogGroup(log_group)]
         )

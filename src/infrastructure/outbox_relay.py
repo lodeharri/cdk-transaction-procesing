@@ -1,43 +1,43 @@
 import json
+import os
 import boto3
-from typing import List, Dict
 
 class OutboxRelayHandler:
     def __init__(self):
-        self.event_bus = boto3.client('events')
+        self.client = boto3.client('events')
+        self.bus_name = os.environ.get("EVENT_BUS_NAME")
 
-    def handle(self, event: Dict):
-        """
-        Lee los registros provenientes de DynamoDB Streams
-        """
+    def handle(self, event):
         entries = []
-        
         for record in event['Records']:
+            # Solo procesamos nuevas inserciones
             if record['eventName'] == 'INSERT':
-                # Deserializamos la imagen de DynamoDB
                 new_image = record['dynamodb']['NewImage']
                 
-                # Transformamos el formato de DynamoDB a JSON plano
-                payload = {
-                    "transaction_id": new_image['id']['S'],
-                    "amount": float(new_image['amount']['N']),
-                    "merchant_id": new_image['merchant_id']['S'],
-                    "status": new_image['status']['S']
-                }
+                # VALIDACIÓN CRÍTICA: Solo notificamos si fue aprobado
+                status = new_image['status']['S']
+                if status == "APPROVED":
+                    payload = {
+                        "transaction_id": new_image['id']['S'],
+                        "correlation_id": new_image['correlation_id']['S'],
+                        "amount": new_image['amount']['N'],
+                        "merchant_id": new_image['merchant_id']['S']
+                    }
 
-                entries.append({
-                    'Source': 'payments.outbox',
-                    'DetailType': 'TransactionCreated',
-                    'Detail': json.dumps(payload),
-                    'EventBusName': 'default'
-                })
-
+                    print(f'bus name: {self.bus_name}')
+                    print(f'payload: {payload}')
+                    entries.append({
+                        'EventBusName': self.bus_name,
+                        'Source': 'some.payments',
+                        'DetailType': 'PaymentConfirmed',
+                        'Detail': json.dumps(payload)
+                    })
+        
         if entries:
-            # Publicamos en batch para mayor eficiencia
-            self.event_bus.put_events(Entries=entries)
-            print(f"Relayed {len(entries)} events to EventBridge")
+            self.client.put_events(Entries=entries)
+            print(f"Relay: Enviados {len(entries)} eventos al bus.")
 
-# Punto de entrada para la nueva Lambda
-relay = OutboxRelayHandler()
+# Punto de entrada para AWS
+relay_handler = OutboxRelayHandler()
 def handler(event, context):
-    relay.handle(event)
+    return relay_handler.handle(event)

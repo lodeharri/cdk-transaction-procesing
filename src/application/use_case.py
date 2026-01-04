@@ -16,17 +16,18 @@ class ProcessPaymentUseCase:
         transaction = Transaction(
             amount=Money(amount=data.amount),
             merchant_id=data.merchant_id,
-            idempotency_key=data.idempotency_key
+            idempotency_key=data.idempotency_key,
+            correlation_id=data.correlation_id
         )
 
         # 3. Validar con Servicio de Dominio (Unión de Agregados)
-        is_approved = self.settlement_service.evaluate_transaction(transaction, account)
+        self.settlement_service.evaluate_transaction(transaction, account)
 
         # 4. Si la idempotency_key ya existe, el repo lanzará una excepción
         self.repo.save_transaction(transaction)
 
         # 5. Publicar Evento si fue aprobada (EDA)
-        if is_approved:
-            self.event_bus.publish("TransactionApproved", transaction.__dict__)
+        # if is_approved:
+        #     self.event_bus.publish("TransactionApproved", transaction.__dict__)
 
         return transaction
